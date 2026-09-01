@@ -72,6 +72,23 @@ The button in that panel copies a set of instructions to your clipboard, written
 
 ![Outlook Calendar in the week view](screenshots/microsoft.png)
 
+## iCalendar feeds
+
+For an exported `.ics` file or a subscribed `https://`/`webcal://` feed, select
+the iCalendar adapter and point it at the file or URL:
+
+```json
+{
+  "provider": "ical",
+  "icalPath": "webcal://example.com/private/calendar.ics"
+}
+```
+
+No additional package or sign-in is required. UTC, numeric-offset and `TZID`
+times are converted to local time, and daily or weekly recurring events are
+expanded into the visible date range. Attendees travel with the agenda data, so
+opening an appointment does not download a remote feed a second time.
+
 ## What you get
 
 **The week, or one day.** The switch in the header decides, and it remembers what you picked. The day view narrows the panel to a single column and puts the start time in front of every appointment.
@@ -108,7 +125,8 @@ Without a config every calendar is drawn in the same grey. Naming them is what m
 }
 ```
 
-For Outlook, keep `"provider": "microsoft"` alongside the `calendars` key in that same object.
+For Outlook or iCalendar, keep the corresponding `"provider"` and iCalendar's
+`"icalPath"` alongside the `calendars` key in that same object.
 
 `match` is a regular expression, tried in order against the calendar name as the selected provider prints it. `priority` decides which appointment the bar picks when two run at once, lowest number first.
 
@@ -160,7 +178,9 @@ cd ~/.config/omarchy/plugins/jankeesvw.meetings/bin
 
 Every appointment carries its start and end, its duration in minutes, the calendar it came from, its colour, its location, its description and its links. Which makes `./meetings-widget week | jq '[.days[].events[]] | length'` a fair answer to how bad next week is.
 
-The command reads the provider from `config.json`; `MEETINGS_PROVIDER=microsoft` overrides it for one invocation.
+The command reads the provider from `config.json`; `MEETINGS_PROVIDER=microsoft`
+or `MEETINGS_PROVIDER=ical MEETINGS_ICAL_PATH=/path/to/calendar.ics` overrides
+it for one invocation.
 
 ## Removing it
 
