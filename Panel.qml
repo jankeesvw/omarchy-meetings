@@ -132,13 +132,27 @@ Panel {
   // least want to lose while you read it.
   property var detailEvent: null
 
+  // Opening one appointment. If there is a Meet link, that is the one you want:
+  // you click a call to get into it, not to read when it is. Without a Meet
+  // link, the detail page, where the rest of the appointment lives.
+  // Enter used to jump straight to the browser. Everything the calendar knows
+  // about an appointment comes first now, and the browser is one of the buttons.
+  // One button per thing the appointment can do. Copying leaves the panel open
+  // where opening closes it: a link on the clipboard is going somewhere else.
   readonly property var detailActions: {
     if (!detailEvent) return []
     var out = []
-    if (safeUrl(detailEvent.hangout) !== "")
-      out.push({ label: "Join the call", url: safeUrl(detailEvent.hangout) })
-    if (safeUrl(detailEvent.link) !== "")
-      out.push({ label: "Open in " + calendarProviderLabel, url: safeUrl(detailEvent.link) })
+    var hangout = safeUrl(detailEvent.hangout)
+    var link = safeUrl(detailEvent.link)
+    if (hangout !== "")
+      out.push({ label: "Join the call", url: hangout })
+    if (link !== "")
+      out.push({ label: "Open in " + calendarProviderLabel, url: link })
+    // The call link when there is one, the calendar page otherwise: that is
+    // the link you would have gone hunting for.
+    var copyUrl = hangout !== "" ? hangout : link
+    if (copyUrl !== "")
+      out.push({ label: copiedLink ? "Copied" : "Copy link", copy: copyUrl })
     return out
   }
 
@@ -568,6 +582,7 @@ Panel {
   // Waarom het paneel leeg is, in de woorden van het script.
   property string blockedReason: ""
   property bool copiedPrompt: false
+  property bool copiedLink: false
 
   readonly property string blockedTitle: {
     if (blockedReason === "m365-missing") return "CLI for Microsoft 365 is not installed"
@@ -639,11 +654,26 @@ Panel {
     copiedPrompt = true
   }
 
+  function copyLink(url) {
+    copyProc.command = ["wl-copy", "--", url]
+    copyProc.running = true
+    copiedLink = true
+  }
+
+  // A detail button either copies or opens. Keyboard activation lands here
+  // just the same as a click, so this is the one place that knows the split.
+  function runDetailAction(action) {
+    if (!action) return
+    if (action.copy) copyLink(action.copy)
+    else openUrl(action.url)
+  }
+
   function showDetail(event) {
     if (!event) return
     measureAnchor()
     detailEvent = event
     cursor = 0
+    copiedLink = false
 
     detailAttendees = []
     var id = String(event.id || "")
@@ -657,6 +687,7 @@ Panel {
 
   function closeDetail() {
     detailAttendees = []
+    copiedLink = false
     var previous = detailEvent
     detailEvent = null
     // Back on the appointment you came from, not at the top of the ring.
@@ -668,7 +699,10 @@ Panel {
     var safe = safeUrl(url)
     if (safe === "") return
     close()
-    Util.execArgv(["omarchy-launch-webapp", safe])
+    // The default browser, not omarchy-launch-webapp: a webapp window has no
+    // address bar and no tabs, which is fine for a calendar you live in but
+    // wrong for a meeting link you may want to share or revisit.
+    Util.execArgv(["xdg-open", safe])
   }
 
   function openEvent(event) {
@@ -677,8 +711,7 @@ Panel {
 
   function openSelected() {
     if (detailEvent) {
-      var action = detailActions[cursor]
-      if (action) openUrl(action.url)
+      runDetailAction(detailActions[cursor])
       return
     }
     if (onJoin) { joinNow(); return }
@@ -1993,7 +2026,7 @@ Panel {
             elide: Text.ElideRight
           }
 
-          Row {
+          Flow {
             width: parent.width
             spacing: Style.space(8)
             visible: root.detailActions.length > 0
@@ -2001,11 +2034,15 @@ Panel {
             Repeater {
               model: root.detailActions
               delegate: Button {
+                // A single long label must not poke out of a narrow card:
+                // cap it to the flow's width and cut the overflow off.
+                width: Math.min(implicitWidth, parent.width)
+                clip: true
                 text: modelData.label
                 hasCursor: root.cursor === index
                 foreground: root.foreground
                 fontFamily: root.fontFamily
-                onClicked: root.openUrl(modelData.url)
+                onClicked: root.runDetailAction(modelData)
               }
             }
           }

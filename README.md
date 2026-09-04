@@ -82,7 +82,7 @@ The button in that panel copies a set of instructions to your clipboard, written
 
 **Getting into the call.** A meeting that is running, or starts within five minutes, puts a join button in the header. One click and you are in it. Outside that window the button is not there, so it never sends you into the wrong call.
 
-**One appointment, opened.** Press Enter or click, and it expands into a card over the grid: when it is and how long it runs, which calendar it came from, where it is, who is coming and whether they answered, and the description. One button joins the video call, another opens it in the configured calendar. Escape goes back to the grid.
+**One appointment, opened.** Press Enter or click, and it expands into a card over the grid: when it is and how long it runs, which calendar it came from, where it is, who is coming and whether they answered, and the description. One button joins the video call, another opens it in the configured calendar, a third copies the link. Escape goes back to the grid.
 
 ![An appointment opened over the week](screenshots/detail.png)
 
