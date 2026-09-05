@@ -8,8 +8,9 @@
     meetings-widget week -1         # last week
     meetings-widget week --demo     # a made-up week, no gcalcli needed
 
-Reads Google Calendar through gcalcli, or Outlook Calendar through the CLI for
-Microsoft 365. Both sources are normalized to the same rows before layout.
+Reads Google Calendar through gcalcli, Outlook Calendar through the CLI for
+Microsoft 365, or an iCalendar file/feed. Every provider is normalized to the
+same rows before layout.
 
 Python rather than a shell script because the work here is dates, overlap and
 JSON, and rather than Ruby because gcalcli is itself a Python program: anyone
@@ -24,6 +25,8 @@ import subprocess
 import sys
 import threading
 from datetime import date, datetime, time, timedelta, timezone
+from urllib.error import URLError
+from urllib.request import urlopen
 from urllib.parse import quote, urlencode, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -60,12 +63,17 @@ def provider_name(value):
     name = str(value or "").strip().lower()
     if name in ("microsoft", "microsoft365", "m365", "outlook"):
         return "microsoft"
+    if name in ("ical", "icalendar", "ics"):
+        return "ical"
     return "google"
 
 
 # Google stays the default, so existing installs need no config change. The
 # environment override is useful for trying the other adapter from a terminal.
 PROVIDER = provider_name(os.environ.get("MEETINGS_PROVIDER") or CONFIG.get("provider"))
+
+_ical_source = os.environ.get("MEETINGS_ICAL_PATH") or CONFIG.get("icalPath") or ""
+ICAL_PATH = os.path.expanduser(str(_ical_source)).strip()
 
 
 def local_timezone_name():
@@ -179,11 +187,17 @@ def authenticated():
     if PROVIDER == "microsoft":
         status = m365_status()
         return isinstance(status, dict) and bool(status.get("connectedAs"))
+    if PROVIDER == "ical":
+        return bool(ICAL_PATH)
     return os.path.isfile(GCALCLI_OAUTH)
 
 
 def required_command():
-    return "m365" if PROVIDER == "microsoft" else "gcalcli"
+    if PROVIDER == "microsoft":
+        return "m365"
+    if PROVIDER == "google":
+        return "gcalcli"
+    return None
 
 
 def provider_payload():
@@ -192,6 +206,12 @@ def provider_payload():
             "provider": "microsoft",
             "provider_label": "Outlook Calendar",
             "agenda_url": "https://outlook.office.com/calendar/view/week",
+        }
+    if PROVIDER == "ical":
+        return {
+            "provider": "ical",
+            "provider_label": "iCalendar",
+            "agenda_url": "",
         }
     return {
         "provider": "google",
@@ -493,6 +513,268 @@ def parse_google_rows(from_day, to_day):
     return [dict(zip(headers, line.split("\t"))) for line in lines[1:]]
 
 
+_ical_raw = None
+_ical_checked = False
+
+
+def read_ical_source():
+    global _ical_raw, _ical_checked
+    if _ical_checked:
+        return _ical_raw
+    _ical_checked = True
+    if not ICAL_PATH:
+        return None
+    path = ICAL_PATH[7:] if ICAL_PATH.startswith("file://") else ICAL_PATH
+    if path.startswith(("http://", "https://", "webcal://")):
+        url = "https://" + path[9:] if path.startswith("webcal://") else path
+        try:
+            with urlopen(url, timeout=10) as response:
+                _ical_raw = response.read().decode("utf-8", errors="replace")
+                return _ical_raw
+        except (OSError, URLError):
+            return None
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            _ical_raw = handle.read()
+            return _ical_raw
+    except OSError:
+        return None
+
+
+def ical_unfold(raw):
+    lines = []
+    for line in raw.splitlines():
+        if line.startswith((" ", "\t")) and lines:
+            lines[-1] += line[1:]
+        else:
+            lines.append(line.rstrip("\r"))
+    return lines
+
+
+def ical_unescape(value):
+    return (value.replace("\\n", "\n").replace("\\N", "\n")
+                 .replace("\\;", ";").replace("\\,", ",")
+                 .replace("\\\\", "\\"))
+
+
+def ical_property(line):
+    if ":" not in line:
+        return None, {}, ""
+    head, value = line.split(":", 1)
+    pieces = head.split(";")
+    params = {}
+    for piece in pieces[1:]:
+        if "=" in piece:
+            key, param = piece.split("=", 1)
+            params[key.upper()] = param.strip('"')
+    return pieces[0].upper(), params, ical_unescape(value)
+
+
+def parse_ics_datetime(value, params=None, convert_to_local=True):
+    """Return an iCalendar value as local wall time without discarding its zone."""
+    text = str(value or "").strip()
+    params = params or {}
+    if not text:
+        return None
+    if re.fullmatch(r"\d{8}", text):
+        return datetime.strptime(text, "%Y%m%d")
+
+    match = re.fullmatch(r"(\d{8}T\d{4}(?:\d{2})?)(Z|[+-]\d{4})?", text)
+    if not match:
+        return None
+    stamp, suffix = match.groups()
+    pattern = "%Y%m%dT%H%M%S" if len(stamp) == 15 else "%Y%m%dT%H%M"
+    parsed = datetime.strptime(stamp, pattern)
+    if suffix == "Z":
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    elif suffix:
+        parsed = parsed.replace(tzinfo=datetime.strptime(suffix, "%z").tzinfo)
+    elif params.get("TZID"):
+        try:
+            parsed = parsed.replace(tzinfo=ZoneInfo(params["TZID"]))
+        except (ValueError, ZoneInfoNotFoundError):
+            pass
+    if convert_to_local and parsed.tzinfo is not None:
+        parsed = parsed.astimezone().replace(tzinfo=None)
+    return parsed
+
+
+def local_ical_datetime(value):
+    return value.astimezone().replace(tzinfo=None) if value.tzinfo is not None else value
+
+
+def ical_calendar_name(lines):
+    for line in lines:
+        name, _params, value = ical_property(line)
+        if name == "X-WR-CALNAME" and value.strip():
+            return value.strip()
+    return "iCalendar"
+
+
+def ical_attendees(lines):
+    people = []
+    for line in lines:
+        name, params, value = ical_property(line)
+        if name != "ATTENDEE":
+            continue
+        email = value[7:] if value.lower().startswith("mailto:") else value
+        display = params.get("CN") or email
+        if display:
+            people.append({
+                "name": display,
+                "email": email,
+                "status": params.get("PARTSTAT", "").lower(),
+            })
+    return people
+
+
+WEEKDAYS = {"MO": 0, "TU": 1, "WE": 2, "TH": 3,
+            "FR": 4, "SA": 5, "SU": 6}
+
+
+def parse_rrule(value):
+    rule = {}
+    for piece in str(value or "").split(";"):
+        if "=" in piece:
+            key, item = piece.split("=", 1)
+            rule[key.upper()] = item.upper()
+    return rule
+
+
+def recurrence_starts(start, rule, from_day, to_day):
+    """Expand the daily and weekly rules used by subscribed meeting feeds."""
+    frequency = rule.get("FREQ")
+    if frequency not in ("DAILY", "WEEKLY"):
+        return [start]
+    try:
+        interval = max(1, int(rule.get("INTERVAL", "1")))
+        count_limit = max(1, int(rule["COUNT"])) if "COUNT" in rule else None
+    except ValueError:
+        return [start]
+    until = parse_ics_datetime(rule.get("UNTIL")) if rule.get("UNTIL") else None
+    starts = []
+    emitted = 0
+
+    if frequency == "DAILY":
+        candidate = start
+        while emitted < 20000:
+            local_candidate = local_ical_datetime(candidate)
+            if local_candidate.date() > to_day or (until and local_candidate > until):
+                break
+            emitted += 1
+            if count_limit is not None and emitted > count_limit:
+                break
+            if local_candidate.date() >= from_day:
+                starts.append(candidate)
+            candidate += timedelta(days=interval)
+        return starts
+
+    weekdays = [WEEKDAYS[item] for item in rule.get("BYDAY", "").split(",")
+                if item in WEEKDAYS]
+    if not weekdays:
+        weekdays = [start.weekday()]
+    weekdays.sort()
+    week = start.date() - timedelta(days=start.weekday())
+    while emitted < 20000:
+        for weekday in weekdays:
+            candidate = datetime.combine(week + timedelta(days=weekday), start.timetz())
+            if candidate < start:
+                continue
+            local_candidate = local_ical_datetime(candidate)
+            if local_candidate.date() > to_day or (until and local_candidate > until):
+                return starts
+            emitted += 1
+            if count_limit is not None and emitted > count_limit:
+                return starts
+            if local_candidate.date() >= from_day:
+                starts.append(candidate)
+        week += timedelta(weeks=interval)
+    return starts
+
+
+def ical_event_rows(lines, calendar_name, from_day, to_day):
+    props = {}
+    repeated = {}
+    for line in lines:
+        name, params, value = ical_property(line)
+        if not name:
+            continue
+        if name in ("ATTENDEE", "EXDATE"):
+            repeated.setdefault(name, []).append((params, value))
+        else:
+            props[name] = (params, value)
+
+    title = (props.get("SUMMARY") or ({}, ""))[1].strip()
+    start_prop = props.get("DTSTART")
+    end_prop = props.get("DTEND")
+    if not title or not start_prop or not end_prop:
+        return []
+    start = parse_ics_datetime(start_prop[1], start_prop[0], convert_to_local=False)
+    end = parse_ics_datetime(end_prop[1], end_prop[0], convert_to_local=False)
+    if start is None or end is None or end < start:
+        return []
+    duration = end - start
+    excluded = set()
+    for params, values in repeated.get("EXDATE", []):
+        for value in values.split(","):
+            parsed = parse_ics_datetime(value, params)
+            if parsed is not None:
+                excluded.add(parsed)
+    starts = [start]
+    if "RRULE" in props:
+        starts = recurrence_starts(start, parse_rrule(props["RRULE"][1]), from_day, to_day)
+
+    uid = (props.get("UID") or ({}, ""))[1]
+    organizer = (props.get("ORGANIZER") or ({}, ""))[1]
+    if organizer.lower().startswith("mailto:"):
+        organizer = organizer[7:]
+    all_day = start_prop[0].get("VALUE") == "DATE" or "T" not in start_prop[1]
+    attendees = ical_attendees(lines)
+    rows = []
+    for source_occurrence in starts:
+        occurrence = local_ical_datetime(source_occurrence)
+        if occurrence in excluded:
+            continue
+        occurrence_end = local_ical_datetime(source_occurrence + duration)
+        if occurrence_end.date() < from_day or occurrence.date() > to_day:
+            continue
+        rows.append({
+            "id": uid or "ical-%s-%s" % (occurrence.isoformat(), title),
+            "start_date": occurrence.strftime("%Y-%m-%d"),
+            "start_time": "" if all_day else occurrence.strftime("%H:%M"),
+            "end_date": occurrence_end.strftime("%Y-%m-%d"),
+            "end_time": "" if all_day else occurrence_end.strftime("%H:%M"),
+            "title": title,
+            "calendar": calendar_name,
+            "html_link": (props.get("URL") or ({}, ""))[1],
+            "conference_uri": "",
+            "location": (props.get("LOCATION") or ({}, ""))[1],
+            "description": (props.get("DESCRIPTION") or ({}, ""))[1],
+            "email": organizer,
+            "attendees": attendees,
+        })
+    return rows
+
+
+def parse_ical_rows(from_day, to_day):
+    raw = read_ical_source()
+    if raw is None:
+        return None
+    lines = ical_unfold(raw)
+    calendar_name = ical_calendar_name(lines)
+    rows = []
+    event = None
+    for line in lines:
+        if line == "BEGIN:VEVENT":
+            event = []
+        elif line == "END:VEVENT" and event is not None:
+            rows.extend(ical_event_rows(event, calendar_name, from_day, to_day))
+            event = None
+        elif event is not None:
+            event.append(line)
+    return rows
+
+
 def graph_url_allowed(url):
     """Never let an authenticated m365 request leave Microsoft Graph."""
     try:
@@ -676,6 +958,8 @@ def parse_rows(from_day, to_day):
         if shutil.which("m365") is None:
             return None
         return parse_microsoft_rows(from_day, to_day)
+    if PROVIDER == "ical":
+        return parse_ical_rows(from_day, to_day)
     if not authenticated():
         return None
     return parse_google_rows(from_day, to_day)
@@ -729,6 +1013,8 @@ def event_from(row, day):
         "location": str(row.get("location") or ""),
         "description": str(row.get("description") or ""),
         "organizer": str(row.get("email") or ""),
+        "attendees": parse_attendees(row.get("attendees")),
+        "attendees_embedded": isinstance(row.get("attendees"), list),
     }
 
     if not title:
@@ -835,6 +1121,8 @@ def assign_columns(events):
 def calendar_url(day, mode):
     if PROVIDER == "microsoft":
         return "https://outlook.office.com/calendar/view/%s" % mode
+    if PROVIDER == "ical":
+        return ""
     path = "%d/%d/%d" % (day.year, day.month, day.day)
     return "https://calendar.google.com/calendar/u/0/r/%s/%s" % (mode, path)
 
@@ -940,6 +1228,12 @@ def fetch_calendar_records():
         return [{"id": name, "name": name} for name in DEMO_CALENDAR_NAMES]
     if PROVIDER == "microsoft":
         return fetch_microsoft_calendars()
+    if PROVIDER == "ical":
+        raw = read_ical_source()
+        if raw is None:
+            return None
+        name = ical_calendar_name(ical_unfold(raw))
+        return [{"id": name, "name": name}]
     if not authenticated():
         return None
     return fetch_google_calendars()
@@ -1058,6 +1352,12 @@ def main():
             dump(microsoft_attendees(calendar_name, event_id))
             return 0
 
+        if PROVIDER == "ical":
+            # iCalendar attendees are embedded in the agenda payload, so the
+            # panel never needs a second read (or download) for this command.
+            dump([])
+            return 0
+
         helper = os.path.join(os.path.dirname(os.path.abspath(__file__)), "meetings-attendees")
         # The argument list goes straight to the process, so no shell is
         # involved that could split a calendar name with a space in it, and
@@ -1106,13 +1406,16 @@ def main():
         # Two different problems that need two different answers: one is fixed
         # by installing something, the other by logging in.
         command_name = required_command()
-        missing = shutil.which(command_name) is None
+        missing = (not ICAL_PATH if PROVIDER == "ical"
+                   else shutil.which(command_name) is None)
         payload = provider_payload()
         payload.update({
             "ok": False,
-            "error": "%s-missing" % command_name if missing else
-                     ("not-authenticated" if not authenticated() else
-                      "%s-failed" % command_name),
+            "error": ("ical-path-missing" if PROVIDER == "ical" and missing else
+                      ("ical-unavailable" if PROVIDER == "ical" else
+                      ("%s-missing" % command_name if missing else
+                      ("not-authenticated" if not authenticated() else
+                       "%s-failed" % command_name)))),
             "events": [], "allday": [], "days": [],
         })
         dump(payload)

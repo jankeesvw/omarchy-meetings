@@ -508,9 +508,8 @@ Panel {
   readonly property string detailCalendar:
     detailEvent ? String(detailEvent.calendar || "") : ""
 
-  // Fetched per appointment at the moment you open it, because the agenda
-  // output does not carry them and asking on every refresh would be a call a
-  // minute for something you only see when you ask for it.
+  // Google and Microsoft fetch these when an appointment opens. iCalendar
+  // already supplied them with the agenda, avoiding a second feed download.
   property var detailAttendees: []
 
   // Where the pointed-at block sits, in panel coordinates. The card hangs off
@@ -570,6 +569,8 @@ Panel {
   property bool copiedPrompt: false
 
   readonly property string blockedTitle: {
+    if (blockedReason === "ical-path-missing") return "iCalendar feed is not configured"
+    if (blockedReason === "ical-unavailable") return "iCalendar feed is unreachable"
     if (blockedReason === "m365-missing") return "CLI for Microsoft 365 is not installed"
     if (blockedReason === "gcalcli-missing") return "gcalcli is not installed"
     if (blockedReason === "not-authenticated") return "Not signed in to " + calendarProviderLabel
@@ -577,6 +578,10 @@ Panel {
   }
 
   readonly property string blockedHint: {
+    if (blockedReason === "ical-path-missing")
+      return "Set provider to ical and add icalPath in the widget config."
+    if (blockedReason === "ical-unavailable")
+      return "Check that the configured .ics file or webcal URL is reachable."
     if (blockedReason === "m365-missing")
       return "This widget reads Outlook through the m365 CLI.\nInstall @pnp/cli-microsoft365 with npm."
     if (blockedReason === "gcalcli-missing")
@@ -592,7 +597,12 @@ Panel {
 
   // Wat je aan een agent geeft. Een opdracht en geen uitleg: het moet iets zijn
   // dat uitgevoerd kan worden zonder dat er nog iets nagevraagd hoeft te worden.
-  readonly property string setupPrompt: calendarProvider === "microsoft" ?
+  readonly property string setupPrompt: calendarProvider === "ical" ?
+    "Set up the omarchy-meetings bar widget for an iCalendar feed on this Omarchy machine.\n\n" +
+    "Write ~/.config/omarchy-meetings/config.json with provider set to ical and " +
+    "icalPath set to my local .ics file or https/webcal calendar URL. Confirm it worked " +
+    "by running meetings-widget week. Do not copy the private feed URL anywhere else." :
+    calendarProvider === "microsoft" ?
     "Set up the omarchy-meetings bar widget for Outlook Calendar on this Omarchy machine.\n\n" +
     "1. Install the CLI: npm i -g @pnp/cli-microsoft365\n" +
     "2. Run: m365 setup\n   Choose scripting and the minimal User.Read permission.\n" +
@@ -645,7 +655,8 @@ Panel {
     detailEvent = event
     cursor = 0
 
-    detailAttendees = []
+    detailAttendees = Array.isArray(event.attendees) ? event.attendees : []
+    if (event.attendees_embedded === true) return
     var id = String(event.id || "")
     var calendar = String(event.calendar || "")
     if (id === "" || calendar === "") return
