@@ -655,6 +655,38 @@ def ical_attendees(lines):
     return people
 
 
+# A meeting link, wherever the exporter decided to put it. Google writes
+# X-GOOGLE-CONFERENCE, Teams writes X-MICROSOFT-SKYPETEAMSMEETINGURL, and
+# plenty of feeds put the link in LOCATION or leave it in the description with
+# the dial-in numbers. Without one of these an iCalendar appointment can never
+# be joined, and the join button and the camera in the grid stay dark for
+# everyone on a subscribed feed.
+CONFERENCE_PROPERTIES = ("X-GOOGLE-CONFERENCE",
+                         "X-MICROSOFT-SKYPETEAMSMEETINGURL",
+                         "X-MICROSOFT-ONLINEMEETINGEXTERNALLINK")
+
+# Deliberately narrow. This ends up in an argument to the browser, so it has to
+# be a plain https URL and nothing that could be read as an option or a second
+# argument. Panel.qml checks the same shape again before it opens anything.
+CONFERENCE_URL = re.compile(r"https://[A-Za-z0-9.-]+/[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]*")
+
+
+def ical_conference_uri(lines, location, description):
+    for line in lines:
+        name, _params, value = ical_property(line)
+        if name in CONFERENCE_PROPERTIES:
+            match = CONFERENCE_URL.fullmatch(value.strip())
+            if match:
+                return match.group(0)
+    # LOCATION before DESCRIPTION: a link in the location field is the meeting,
+    # while a description can mention any number of unrelated ones.
+    for text in (location, description):
+        match = CONFERENCE_URL.search(str(text or ""))
+        if match:
+            return match.group(0)
+    return ""
+
+
 WEEKDAYS = {"MO": 0, "TU": 1, "WE": 2, "TH": 3,
             "FR": 4, "SA": 5, "SU": 6}
 
@@ -751,6 +783,9 @@ def ical_event_rows(lines, calendar_name, from_day, to_day):
     if "RRULE" in props:
         starts = recurrence_starts(start, parse_rrule(props["RRULE"][1]), from_day, to_day)
 
+    location = (props.get("LOCATION") or ({}, ""))[1]
+    description = (props.get("DESCRIPTION") or ({}, ""))[1]
+    conference = ical_conference_uri(lines, location, description)
     uid = (props.get("UID") or ({}, ""))[1]
     organizer = (props.get("ORGANIZER") or ({}, ""))[1]
     if organizer.lower().startswith("mailto:"):
@@ -774,9 +809,9 @@ def ical_event_rows(lines, calendar_name, from_day, to_day):
             "title": title,
             "calendar": calendar_name,
             "html_link": (props.get("URL") or ({}, ""))[1],
-            "conference_uri": "",
-            "location": (props.get("LOCATION") or ({}, ""))[1],
-            "description": (props.get("DESCRIPTION") or ({}, ""))[1],
+            "conference_uri": conference,
+            "location": location,
+            "description": description,
             "email": organizer,
             "attendees": attendees,
         })

@@ -28,6 +28,13 @@ Panel {
     Qt.resolvedUrl("bin/meetings-widget").toString().replace(/^file:\/\//, "")
 
   readonly property string iconCalendar: "\uf073"
+  // Written as escapes rather than as the characters themselves: a literal
+  // glyph does not always survive the trip from editor to disk, and an empty
+  // string renders as nothing with no error to go on.
+  readonly property string iconJoin: "\uf03d"
+  readonly property string iconOpen: "\uf08e"
+  readonly property string iconCopy: "\uf0c5"
+  readonly property string iconCopied: "\uf00c"
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color urgent: bar ? bar.urgent : Color.urgent
@@ -146,15 +153,21 @@ Panel {
     var out = []
     var hangout = safeUrl(detailEvent.hangout)
     var link = safeUrl(detailEvent.link)
+    // A glyph and one word each, so three of them sit on one line under a
+    // narrow card instead of wrapping onto a second. The sentence that used
+    // to be the label is the tooltip now, where it costs no width.
     if (hangout !== "")
-      out.push({ label: "Join the call", url: hangout })
+      out.push({ label: "Join", icon: iconJoin, tip: "Join the call", url: hangout })
     if (link !== "")
-      out.push({ label: "Open in " + calendarProviderLabel, url: link })
+      out.push({ label: "Open", icon: iconOpen,
+                 tip: "Open in " + calendarProviderLabel, url: link })
     // The call link when there is one, the calendar page otherwise: that is
     // the link you would have gone hunting for.
     var copyUrl = hangout !== "" ? hangout : link
     if (copyUrl !== "")
-      out.push({ label: copiedLink ? "Copied" : "Copy link", copy: copyUrl })
+      out.push({ label: copiedLink ? "Copied" : "Copy",
+                 icon: copiedLink ? iconCopied : iconCopy,
+                 tip: "Copy the link to the clipboard", copy: copyUrl })
     return out
   }
 
@@ -675,6 +688,65 @@ Panel {
     openUrl(joinable.hangout)
   }
 
+  // The last minute before a call is the one you miss: the bar has been
+  // counting down for five minutes in a corner you were not looking at. So it
+  // says so out loud once, with the link on the button, and clicking it is the
+  // whole journey from noticing to being in the call.
+  readonly property int notifyMinutes: 1
+
+  // Which appointment has already been announced, so a minute-by-minute
+  // refresh does not announce the same call again, and so the next one still
+  // gets its own.
+  property string notifiedKey: ""
+
+  // The identity of an appointment for that purpose. sameEvent() compares two
+  // objects; this has to survive a refresh that hands back new ones.
+  function eventKey(event) {
+    if (!event) return ""
+    var id = String(event.id || "")
+    if (id !== "") return id
+    return String(event.title || "") + "@" + String(event.start_epoch || "")
+  }
+
+  // Notification bodies are drawn by a daemon this plugin does not own, and
+  // the title comes out of somebody else's invite. Angle brackets go, so a
+  // calendar entry cannot turn into markup with an image in it.
+  function plain(value) {
+    return String(value || "").replace(/[<>]/g, "")
+  }
+
+  function announceJoin() {
+    if (!joinable) return
+    var url = safeUrl(joinable.hangout)
+    if (url === "") return
+    // Once it is running the moment has passed: an announcement then is a
+    // reminder you are late, which the bar already makes in red.
+    if (minutesUntil > notifyMinutes || minutesUntil <= 0) return
+    var key = eventKey(joinable)
+    if (key === "" || key === notifiedKey) return
+    notifiedKey = key
+    // omarchy-notification-send rather than notify-send, because the shell's
+    // own notification service renders no action buttons: it runs the default
+    // action when the notification itself is clicked, and --exec is how that
+    // argv gets attached. It runs detached, so opening the call does not
+    // depend on this plugin still being around a minute later.
+    //
+    // The argv goes through Util.execArgv with no shell between, and the URL
+    // has already been through safeUrl(), so nothing here is parsed as an
+    // option or split on a space.
+    //
+    // -g gives it the same camera the grid uses, which resolves out of the bar
+    // font rather than out of an icon theme that may not carry a calendar.
+    joinNotifyProc.command = ["omarchy-notification-send",
+                              "--app-name", "Meetings",
+                              "-g", root.iconJoin,
+                              "-u", "critical",
+                              root.plain(joinable.title),
+                              "Starts in a minute, click to join",
+                              "--exec", "xdg-open", url]
+    joinNotifyProc.running = true
+  }
+
   function copySetupPrompt() {
     copyProc.command = ["wl-copy", "--", root.setupPrompt]
     copyProc.running = true
@@ -769,6 +841,12 @@ Panel {
     cursor = Math.max(1, Math.min(ring.length, cursor + delta))
   }
 
+  // The clock moves this every minute and so does a refresh that brings back a
+  // different next appointment, which is exactly the two ways the last minute
+  // can arrive. The timer calls announceJoin() too, because a refresh that
+  // lands between ticks changes `upcoming` without moving this number.
+  onMinutesUntilChanged: announceJoin()
+
   onOpenedChanged: {
     if (opened) {
       // Always start on today: where you left off yesterday is rarely where
@@ -840,6 +918,12 @@ Panel {
     id: compactProc
   }
 
+  // Sending the join notification. The click is handled by the notification
+  // service through the --exec argv, so nothing has to be read back here.
+  Process {
+    id: joinNotifyProc
+  }
+
   Process {
     id: attendeesProc
     stdout: StdioCollector {
@@ -899,7 +983,13 @@ Panel {
     triggeredOnStart: true
     // With the panel closed this is about the bar, and the bar is always about
     // your own day today, whatever you were looking at last time.
-    onTriggered: root.opened ? root.refresh() : root.refreshToday()
+    onTriggered: {
+      if (root.opened) root.refresh()
+      else root.refreshToday()
+      // After the refresh, not before: the minute that just passed is what
+      // decides whether this is the last one.
+      root.announceJoin()
+    }
   }
 
   Timer {
@@ -1740,10 +1830,20 @@ Panel {
                       anchors.topMargin: Style.space(3)
                       anchors.bottomMargin: Style.space(3)
                       // In the week there is no room for the time beside it,
-                      // and there you read it off the axis anyway.
-                      text: (block.lane > 1 || root.weekView)
-                            ? block.modelData.title
-                            : block.modelData.start + "  " + block.modelData.title
+                      // and there you read it off the axis anyway. A camera
+                      // after the title marks the ones you join rather than
+                      // walk to: that is the difference between needing to be
+                      // somewhere in five minutes and needing to click.
+                      // Inside the string rather than beside it, so it wraps
+                      // and elides with the title instead of floating over it.
+                      text: {
+                        var name = block.modelData.title
+                        if (root.safeUrl(block.modelData.hangout) !== "")
+                          name += "  " + root.iconJoin
+                        return (block.lane > 1 || root.weekView)
+                               ? name
+                               : block.modelData.start + "  " + name
+                      }
                       elide: Text.ElideRight
                       wrapMode: block.height > Style.space(30) ? Text.Wrap : Text.NoWrap
                       font.family: root.fontFamily
@@ -2073,6 +2173,11 @@ Panel {
                 width: Math.min(implicitWidth, parent.width)
                 clip: true
                 text: modelData.label
+                iconText: modelData.icon || ""
+                // The mouse gets the whole sentence here. The keyboard does
+                // not see a tooltip, so the one word has to carry it alone,
+                // which is why it is the verb and not the object.
+                tooltipText: modelData.tip || ""
                 hasCursor: root.cursor === index
                 foreground: root.foreground
                 fontFamily: root.fontFamily

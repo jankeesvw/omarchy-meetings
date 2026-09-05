@@ -87,7 +87,10 @@ the iCalendar adapter and point it at the file or URL:
 No additional package or sign-in is required. UTC, numeric-offset and `TZID`
 times are converted to local time, and daily or weekly recurring events are
 expanded into the visible date range. Attendees travel with the agenda data, so
-opening an appointment does not download a remote feed a second time.
+opening an appointment does not download a remote feed a second time. A meeting
+link is picked up from `X-GOOGLE-CONFERENCE`, the Teams equivalents, or an
+`https` link in the location or the description, so an appointment out of a feed
+joins the same way one out of Google or Outlook does.
 
 A subscribed feed has to be `https://` or `webcal://`. That URL is the whole key to your calendar, and over plain `http://` it crosses the network in the clear, so the panel refuses it and says why rather than downgrading quietly. The feed is read through the same ceiling as every other source, eight megabytes, and anything past it counts as unreachable: half a calendar looks like a week with appointments missing from it.
 
@@ -101,7 +104,11 @@ A subscribed feed has to be `https://` or `webcal://`. That URL is the whole key
 
 **Getting into the call.** A meeting that is running, or starts within five minutes, puts a join button in the header. One click and you are in it. Outside that window the button is not there, so it never sends you into the wrong call.
 
-**One appointment, opened.** Press Enter or click, and it expands into a card over the grid: when it is and how long it runs, which calendar it came from, where it is, who is coming and whether they answered, and the description. One button joins the video call, another opens it in the configured calendar, a third copies the link. Escape goes back to the grid.
+**And a minute before it starts, out loud.** The bar has been counting down in a corner you were not looking at, so a call with a link announces itself once with a Join button on the notification. Pressing it opens the call, which is the whole distance between noticing and being in it. Once per appointment, never for one that has already started, and never for an appointment without a link. It needs a notification daemon that advertises actions; without one the notification still arrives, just without the button.
+
+**Which ones are online.** Appointments with a meeting link carry a small camera after the title in the grid, so a glance tells you which ones you click into and which ones you have to walk to.
+
+**One appointment, opened.** Press Enter or click, and it expands into a card over the grid: when it is and how long it runs, which calendar it came from, where it is, who is coming and whether they answered, and the description. Three small buttons under it: join the call, open it in the configured calendar, and copy the link. They are a glyph and one word each so they fit on one line, and the mouse gets the whole sentence as a tooltip. Escape goes back to the grid.
 
 ![An appointment opened over the week](screenshots/detail.png)
 
