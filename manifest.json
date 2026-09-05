@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "jankeesvw.meetings",
   "name": "Meetings",
-  "version": "1.1.0",
+  "version": "1.3.0",
   "author": "Jankees",
   "description": "Your day as a column, with a line where you are in it. Overlapping appointments sit side by side.",
   "kinds": [
