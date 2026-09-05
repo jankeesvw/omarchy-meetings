@@ -134,6 +134,9 @@ GCALCLI_OAUTH = home_path("XDG_DATA_HOME", ".local/share", "gcalcli", "oauth")
 # timeout therefore both read as failure, never as data.
 MAX_CLI_BYTES = 8 * 1024 * 1024
 CLI_TIMEOUT_SECONDS = 90
+# A feed is one request rather than a program that has to start first, so it
+# gets a shorter leash than the CLIs do.
+ICAL_TIMEOUT_SECONDS = 10
 
 
 def run_capped(command, timeout=CLI_TIMEOUT_SECONDS):
@@ -518,6 +521,14 @@ _ical_checked = False
 
 
 def read_ical_source():
+    """The feed, read through the same ceiling every other source goes through.
+
+    A calendar is kilobytes, so the ceiling is generous and anything past it
+    means the source is broken or hostile. Overflow fails closed rather than
+    handing back the first eight megabytes: half a feed parses into a
+    plausible week that is missing appointments, which is worse than no week
+    at all.
+    """
     global _ical_raw, _ical_checked
     if _ical_checked:
         return _ical_raw
@@ -526,19 +537,34 @@ def read_ical_source():
         return None
     path = ICAL_PATH[7:] if ICAL_PATH.startswith("file://") else ICAL_PATH
     if path.startswith(("http://", "https://", "webcal://")):
+        # A subscribed feed URL is the whole credential: anyone holding it
+        # reads the calendar. Over http it crosses the network in the clear,
+        # so that scheme is refused rather than quietly downgraded. webcal is
+        # the same URL under another name and becomes https.
+        if path.startswith("http://"):
+            return None
         url = "https://" + path[9:] if path.startswith("webcal://") else path
         try:
-            with urlopen(url, timeout=10) as response:
-                _ical_raw = response.read().decode("utf-8", errors="replace")
-                return _ical_raw
+            with urlopen(url, timeout=ICAL_TIMEOUT_SECONDS) as response:
+                data = response.read(MAX_CLI_BYTES + 1)
         except (OSError, URLError):
             return None
+        if len(data) > MAX_CLI_BYTES:
+            return None
+        _ical_raw = data.decode("utf-8", errors="replace")
+        return _ical_raw
+    # Binary, then decode: read() on a text stream counts characters rather
+    # than bytes, so a ceiling checked against it lets a multibyte file through
+    # at several times the size it is supposed to stop at.
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as handle:
-            _ical_raw = handle.read()
-            return _ical_raw
+        with open(path, "rb") as handle:
+            data = handle.read(MAX_CLI_BYTES + 1)
     except OSError:
         return None
+    if len(data) > MAX_CLI_BYTES:
+        return None
+    _ical_raw = data.decode("utf-8", errors="replace")
+    return _ical_raw
 
 
 def ical_unfold(raw):
@@ -1412,10 +1438,11 @@ def main():
         payload.update({
             "ok": False,
             "error": ("ical-path-missing" if PROVIDER == "ical" and missing else
+                      ("ical-insecure" if PROVIDER == "ical" and ICAL_PATH.startswith("http://") else
                       ("ical-unavailable" if PROVIDER == "ical" else
                       ("%s-missing" % command_name if missing else
                       ("not-authenticated" if not authenticated() else
-                       "%s-failed" % command_name)))),
+                       "%s-failed" % command_name))))),
             "events": [], "allday": [], "days": [],
         })
         dump(payload)

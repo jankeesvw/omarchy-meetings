@@ -89,6 +89,8 @@ times are converted to local time, and daily or weekly recurring events are
 expanded into the visible date range. Attendees travel with the agenda data, so
 opening an appointment does not download a remote feed a second time.
 
+A subscribed feed has to be `https://` or `webcal://`. That URL is the whole key to your calendar, and over plain `http://` it crosses the network in the clear, so the panel refuses it and says why rather than downgrading quietly. The feed is read through the same ceiling as every other source, eight megabytes, and anything past it counts as unreachable: half a calendar looks like a week with appointments missing from it.
+
 ## What you get
 
 **The week, or one day.** The switch in the header decides, and it remembers what you picked. The day view narrows the panel to a single column and puts the start time in front of every appointment.

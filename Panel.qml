@@ -571,6 +571,7 @@ Panel {
   readonly property string blockedTitle: {
     if (blockedReason === "ical-path-missing") return "iCalendar feed is not configured"
     if (blockedReason === "ical-unavailable") return "iCalendar feed is unreachable"
+    if (blockedReason === "ical-insecure") return "iCalendar feed is not on https"
     if (blockedReason === "m365-missing") return "CLI for Microsoft 365 is not installed"
     if (blockedReason === "gcalcli-missing") return "gcalcli is not installed"
     if (blockedReason === "not-authenticated") return "Not signed in to " + calendarProviderLabel
@@ -582,6 +583,8 @@ Panel {
       return "Set provider to ical and add icalPath in the widget config."
     if (blockedReason === "ical-unavailable")
       return "Check that the configured .ics file or webcal URL is reachable."
+    if (blockedReason === "ical-insecure")
+      return "A subscribed feed URL is the key to the whole calendar.\nUse https or webcal, not http."
     if (blockedReason === "m365-missing")
       return "This widget reads Outlook through the m365 CLI.\nInstall @pnp/cli-microsoft365 with npm."
     if (blockedReason === "gcalcli-missing")
