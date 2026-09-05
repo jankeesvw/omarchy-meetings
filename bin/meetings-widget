@@ -119,6 +119,7 @@ VISIBLE = [str(name) for name in _visible] if isinstance(_visible, list) and _vi
 # The week is the default: it says more at a glance, and it is what you get
 # before you have ever chosen otherwise.
 VIEW = "day" if STATE.get("view") == "day" else "week"
+COMPACT = STATE.get("compact") is True
 
 
 # gcalcli stores its token here, and without one it starts an interactive auth
@@ -1399,6 +1400,13 @@ def main():
         dump({"ok": write_private(STATE_PATH, json.dumps(merged)), "view": wanted})
         return 0
 
+    if command == "set-compact":
+        wanted = len(ARGV) > 1 and ARGV[1] == "1"
+        merged = dict(STATE)
+        merged["compact"] = wanted
+        dump({"ok": write_private(STATE_PATH, json.dumps(merged)), "compact": wanted})
+        return 0
+
     if command == "set-calendars":
         # Everything after the command is a calendar name. An empty list would
         # mean an empty grid with no way back from the panel, so it is stored as
@@ -1437,6 +1445,7 @@ def main():
         payload = provider_payload()
         payload.update({
             "ok": False,
+            "compact": COMPACT,
             "error": ("ical-path-missing" if PROVIDER == "ical" and missing else
                       ("ical-insecure" if PROVIDER == "ical" and ICAL_PATH.startswith("http://") else
                       ("ical-unavailable" if PROVIDER == "ical" else
@@ -1476,6 +1485,7 @@ def main():
         "visible": VISIBLE if VISIBLE is not None
                    else [name for name in known if name not in SKIP_CALENDARS],
         "view": VIEW,
+        "compact": COMPACT,
         "now": now.strftime("%H:%M"),
         "now_minutes": now.hour * 60 + now.minute,
         "upcoming": upcoming,

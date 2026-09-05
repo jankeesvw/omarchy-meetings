@@ -56,6 +56,8 @@ Panel {
   // The week is the default: it says more at a glance than a single day, and it
   // is always ready because it is fetched in the background.
   property bool weekView: true
+  property bool compact: false
+  property bool compactApplied: false
   property bool loading: false
 
   // The controls and every appointment form one ring that tab walks, in the
@@ -264,7 +266,7 @@ Panel {
 
   // The title is cut at 20 characters, as it always was: any longer pushes the
   // rest of the bar aside for something you read in the panel anyway.
-  readonly property string barLabel: {
+  readonly property string fullBarLabel: {
     if (!reachable) return ""
     // Say so when the day is empty. A bare icon is indistinguishable from a
     // calendar that is still loading, and having nothing left on the schedule
@@ -273,6 +275,7 @@ Panel {
     var title = upcoming.title.length > 20 ? upcoming.title.substring(0, 20) + "…" : upcoming.title
     return title + " @ " + upcoming.start + " " + countdown
   }
+  readonly property string barLabel: compact ? "" : fullBarLabel
 
   // A fetch that is already running is out of date: you have picked another day
   // or calendar in the meantime. Letting it finish and doing nothing left the
@@ -386,6 +389,13 @@ Panel {
     refresh()
   }
 
+  function toggleCompact() {
+    compact = !compact
+    compactApplied = true
+    compactProc.command = [root.script, "set-compact", compact ? "1" : "0"]
+    compactProc.running = true
+  }
+
   // Tab wraps around, the controls included.
   function tabStep(direction) {
     if (cursor < 0) cursor = direction > 0 ? 0 : ringLength - 1
@@ -442,6 +452,10 @@ Panel {
       if (!viewApplied && data.view) {
         weekView = data.view === "week"
         viewApplied = true
+      }
+      if (!compactApplied && data.compact !== undefined) {
+        compact = data.compact === true
+        compactApplied = true
       }
       if (!writingCalendars) visibleCalendars = data.visible || []
       // The bar is about today: paging around in the panel must not change it,
@@ -775,6 +789,7 @@ Panel {
                               ringLength: root.ringLength, cursor: root.cursor,
                               calendars: root.calendars, visible: root.visibleCalendars,
                               checked: root.checkedCalendars,
+                              compact: root.compact,
                               pickerOpen: calendarPicker.popupOpen })
     }
   }
@@ -786,6 +801,10 @@ Panel {
   Process {
     id: viewProc
     onExited: function(exitCode) { root.writingView = false }
+  }
+
+  Process {
+    id: compactProc
   }
 
   Process {
@@ -868,7 +887,7 @@ Panel {
     // While the appointment is running the bar stands out; otherwise it is a
     // look ahead.
     active: root.current !== null
-    tooltipText: ""
+    tooltipText: root.compact ? root.fullBarLabel : ""
 
     iconComponent: Component {
       Item {
@@ -891,22 +910,22 @@ Panel {
           // The calendar colour, in place of the emoji square it used to be.
           Rectangle {
             anchors.verticalCenter: parent.verticalCenter
-            visible: root.upcoming !== null && !root.almostDue
+            visible: root.upcoming !== null && !root.almostDue && !root.compact
             width: Style.space(7)
             height: Style.space(7)
             radius: width / 2
             color: root.upcoming ? root.upcoming.color : "transparent"
           }
 
-          Text {
-            textFormat: Text.PlainText
+          OpticalGlyph {
             anchors.verticalCenter: parent.verticalCenter
-            visible: root.upcoming === null
+            width: Style.bar.iconCanvas
+            height: Style.bar.iconCanvas
+            visible: root.compact || root.upcoming === null
             text: root.iconCalendar
-            font.family: root.fontFamily
-            font.pixelSize: Style.bar.iconFont
-            renderType: Text.NativeRendering
-            color: root.foreground
+            fontFamily: root.fontFamily
+            fontSize: Style.bar.iconFont
+            color: root.almostDue ? Color.background : root.foreground
           }
 
           Text {
@@ -926,6 +945,7 @@ Panel {
 
     onPressed: function(b) {
       if (b === Qt.MiddleButton) root.refresh()
+      else if (b === Qt.RightButton) root.toggleCompact()
       else root.toggle()
     }
   }

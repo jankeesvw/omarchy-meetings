@@ -113,6 +113,16 @@ With Google, attendees do not come out of gcalcli's output, so they are fetched 
 
 **Everything from the keyboard.** Tab walks the switch, every appointment and the controls at the bottom. Arrows move between appointments and left and right page through days or weeks. Enter opens what you are on, Escape steps back out.
 
+**A compact bar when space is tight.** Right-click the meeting in the bar to collapse it to a calendar icon. Right-click again to bring the full label back. Left-click still opens the calendar and middle-click refreshes it.
+
+Expanded:
+
+![Expanded meeting label](screenshots/bar-expanded.png)
+
+Compact:
+
+![Compact calendar icon](screenshots/bar-compact.png)
+
 ## Colours
 
 Without a config every calendar is drawn in the same grey. Naming them is what makes a week readable at a glance, so write `~/.config/omarchy-meetings/config.json`:
