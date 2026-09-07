@@ -509,7 +509,17 @@ def parse_google_rows(from_day, to_day):
     if out is None:
         return None
 
-    lines = out.splitlines()
+    # gcalcli separates records with LF and escapes LF inside fields as ``\\n``.
+    # Outlook descriptions can retain a raw CR before that escape, which
+    # splitlines() mistakes for a record boundary. Split only on the delimiter
+    # gcalcli writes, while still accepting CRLF record endings.
+    header_end = out.find("\n")
+    crlf_records = header_end > 0 and out[header_end - 1] == "\r"
+    lines = out.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    if crlf_records:
+        lines = [line.removesuffix("\r") for line in lines]
     if not lines:
         return []
 
