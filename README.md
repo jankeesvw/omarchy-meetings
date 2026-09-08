@@ -41,6 +41,17 @@ gcalcli list     # should now print your calendars
 
 `init` stores a token in `~/.local/share/gcalcli`. There is nothing to log into separately: this plugin runs gcalcli, and the attendee lookup borrows that same token. If you would rather use your own Google Cloud OAuth client, pass `--client-id` and `--client-secret` to `gcalcli init` and the rest works the same.
 
+The widget uses JSON agenda output when `gcalcli agenda --help` advertises
+`--json`. This preserves tabs, line breaks and Unicode separators inside
+meeting text without shifting the calendar or joining-link fields.
+
+gcalcli 4.5.1 does not offer JSON output; upstream development builds do.
+Older versions still work with ordinary TSV records. If a record has an
+unexpected number of fields, the panel reports the problem instead of showing
+an incomplete or mislabelled agenda. To read events containing embedded tabs,
+use a gcalcli build with JSON support. Removing the tabs from the affected
+meeting text is a temporary workaround on older versions.
+
 ## Outlook and Microsoft Teams
 
 Outlook works through [CLI for Microsoft 365](https://pnp.github.io/cli-microsoft365/). Install it and set the provider in `~/.config/omarchy-meetings/config.json`:

@@ -616,6 +616,8 @@ Panel {
     if (blockedReason === "ical-insecure") return "iCalendar feed is not on https"
     if (blockedReason === "m365-missing") return "CLI for Microsoft 365 is not installed"
     if (blockedReason === "gcalcli-missing") return "gcalcli is not installed"
+    if (blockedReason === "google-tsv-ambiguous") return "Calendar text could not be read"
+    if (blockedReason === "google-invalid-data") return "Calendar data could not be read"
     if (blockedReason === "not-authenticated") return "Not signed in to " + calendarProviderLabel
     return "Calendar unreachable"
   }
@@ -631,6 +633,10 @@ Panel {
       return "This widget reads Outlook through the m365 CLI.\nInstall @pnp/cli-microsoft365 with npm."
     if (blockedReason === "gcalcli-missing")
       return "This widget reads your calendar through gcalcli.\nInstall it with: yay -S gcalcli"
+    if (blockedReason === "google-tsv-ambiguous")
+      return "Your gcalcli version cannot safely export this calendar text.\nUse a build with JSON output; removing tabs from meeting text is a temporary workaround."
+    if (blockedReason === "google-invalid-data")
+      return "gcalcli returned an unexpected calendar format.\nCheck your gcalcli version and configuration, then refresh."
     if (blockedReason === "not-authenticated")
       return calendarProvider === "microsoft"
         ? "Run m365 setup, then m365 login in a terminal.\nThe Entra app needs delegated Calendars.Read permission."
