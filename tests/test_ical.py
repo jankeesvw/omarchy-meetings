@@ -5,6 +5,8 @@ import time
 import unittest
 from datetime import date, datetime
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import Request
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -91,3 +93,77 @@ class ICalendarTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FakeResponse:
+    def __init__(self, url, body=b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"):
+        self.url = url
+        self.body = body
+
+    def geturl(self):
+        return self.url
+
+    def read(self, limit=-1):
+        return self.body if limit < 0 else self.body[:limit]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class FakeOpener:
+    def __init__(self, response):
+        self.response = response
+
+    def open(self, request, timeout=None):
+        return self.response
+
+
+class ICalendarFeedTransportTests(unittest.TestCase):
+    """The feed URL is the credential, so it may only ever travel over https."""
+
+    def setUp(self):
+        self.saved = (widget.ICAL_PATH, widget._ical_opener,
+                      widget._ical_raw, widget._ical_checked)
+        widget._ical_raw = None
+        widget._ical_checked = False
+
+    def tearDown(self):
+        (widget.ICAL_PATH, widget._ical_opener,
+         widget._ical_raw, widget._ical_checked) = self.saved
+
+    def test_redirect_to_http_is_refused(self):
+        handler = widget.HttpsOnlyRedirects()
+        with self.assertRaises(URLError):
+            handler.redirect_request(
+                Request("https://calendar.example/feed.ics"), None, 302, "Found",
+                {}, "http://calendar.example/feed.ics")
+
+    def test_redirect_to_https_is_followed(self):
+        handler = widget.HttpsOnlyRedirects()
+        moved = handler.redirect_request(
+            Request("https://calendar.example/feed.ics"), None, 302, "Found",
+            {}, "https://cdn.example/feed.ics")
+        self.assertEqual(moved.full_url, "https://cdn.example/feed.ics")
+
+    def test_feed_that_landed_off_https_is_not_read(self):
+        widget.ICAL_PATH = "https://calendar.example/feed.ics"
+        widget._ical_opener = FakeOpener(
+            FakeResponse("http://calendar.example/feed.ics"))
+        self.assertIsNone(widget.read_ical_source())
+
+    def test_feed_that_stayed_on_https_is_read(self):
+        widget.ICAL_PATH = "https://calendar.example/feed.ics"
+        widget._ical_opener = FakeOpener(
+            FakeResponse("https://cdn.example/feed.ics"))
+        self.assertEqual(widget.read_ical_source(),
+                         "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n")
+
+    def test_http_feed_url_is_refused_before_any_request(self):
+        widget.ICAL_PATH = "http://calendar.example/feed.ics"
+        widget._ical_opener = FakeOpener(
+            FakeResponse("https://calendar.example/feed.ics"))
+        self.assertIsNone(widget.read_ical_source())
+

@@ -26,7 +26,7 @@ import sys
 import threading
 from datetime import date, datetime, time, timedelta, timezone
 from urllib.error import URLError
-from urllib.request import urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 from urllib.parse import quote, urlencode, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -531,6 +531,25 @@ _ical_raw = None
 _ical_checked = False
 
 
+class HttpsOnlyRedirects(HTTPRedirectHandler):
+    """Follows a redirect only when it stays on https.
+
+    Refusing an http:// feed URL is worth nothing if the https one is allowed
+    to answer with a redirect to http and the client walks over there: the
+    feed URL is the credential either way, and it is the final hop that goes
+    over the wire. So every hop has to be https, and the response is checked
+    once more afterwards for the URL it actually came from.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if urlsplit(newurl).scheme != "https":
+            raise URLError("redirect off https refused")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_ical_opener = build_opener(HttpsOnlyRedirects)
+
+
 def read_ical_source():
     """The feed, read through the same ceiling every other source goes through.
 
@@ -556,9 +575,11 @@ def read_ical_source():
             return None
         url = "https://" + path[9:] if path.startswith("webcal://") else path
         try:
-            with urlopen(url, timeout=ICAL_TIMEOUT_SECONDS) as response:
+            with _ical_opener.open(Request(url), timeout=ICAL_TIMEOUT_SECONDS) as response:
+                if urlsplit(response.geturl()).scheme != "https":
+                    return None
                 data = response.read(MAX_CLI_BYTES + 1)
-        except (OSError, URLError):
+        except (OSError, URLError, ValueError):
             return None
         if len(data) > MAX_CLI_BYTES:
             return None
