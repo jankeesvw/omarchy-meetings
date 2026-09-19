@@ -494,13 +494,84 @@ def demo_rows(from_day, to_day):
     return rows
 
 
+_google_json_support = None
+GOOGLE_ERROR = ""
+
+
+def google_json_supported():
+    """Probe the CLI rather than assuming its package version has --json.
+
+    4.5.1 has only TSV; upstream development builds also offer JSON. Cache
+    within this invocation so repeated reads need only one probe.
+    """
+    global _google_json_support
+    if _google_json_support is None:
+        help_text = run_capped(["gcalcli", "agenda", "--help"], timeout=10)
+        _google_json_support = bool(
+            help_text and re.search(r"(?<!\S)--json(?:[\s,=]|$)", help_text))
+    return _google_json_support
+
+
+def google_json_rows(out):
+    """Flatten gcalcli's structured details into the existing provider rows."""
+    try:
+        events = json.loads(out)
+        if not isinstance(events, list):
+            return None
+        rows = []
+        for event in events:
+            if not isinstance(event, dict):
+                return None
+            if not event.get("title") or "calendar" not in event:
+                return None
+            timing = event.get("time")
+            if not isinstance(timing, dict):
+                return None
+            row = {}
+            for key in ("start_date", "start_time", "end_date", "end_time"):
+                value = timing.get(key)
+                if not isinstance(value, str):
+                    return None
+                row[key] = value
+            for key in ("id", "title", "location", "description", "calendar", "email"):
+                value = event.get(key, "")
+                if not isinstance(value, str):
+                    return None
+                row[key] = value
+            urls = event.get("url", {})
+            conference = event.get("conference", [])
+            if not isinstance(urls, dict) or not isinstance(conference, list):
+                return None
+            # Match TSV's first conference entry. Attendee details continue to
+            # use the existing on-demand lookup, with no extra agenda payload.
+            first = conference[0] if conference else {}
+            if not isinstance(first, dict):
+                return None
+            for source, keys in ((urls, ("html_link", "hangout_link")),
+                                 (first, ("conference_uri",))):
+                for key in keys:
+                    value = source.get(key, "")
+                    if not isinstance(value, str):
+                        return None
+                    row[key] = value
+            rows.append(row)
+        return rows
+    except (TypeError, ValueError):
+        return None
+
+
 def parse_google_rows(from_day, to_day):
-    """Read the columns by name rather than by position: the order shifts with
-    every --details that gets added, and then everything silently shifts along
-    with it. Without an explicit range, gcalcli agenda starts at now, so
-    yesterday simply does not exist and paging back gives an empty day. The
-    range runs to the day after, because gcalcli treats the end as exclusive."""
-    command = ["gcalcli", "agenda", "--tsv", "--nodeclined", "--details", "all",
+    """Prefer structured fields; older CLIs use strictly checked TSV headers.
+
+    Without an explicit range, gcalcli agenda starts at now, so paging back
+    gives an empty day. The range runs to the day after because gcalcli treats
+    the end as exclusive.
+    """
+    global GOOGLE_ERROR
+    GOOGLE_ERROR = ""
+    use_json = google_json_supported()
+    command = ["gcalcli", "agenda", "--json" if use_json else "--tsv",
+               "--nodeclined", "--details", "all",
                from_day.strftime("%Y-%m-%d"),
                (to_day + timedelta(days=1)).strftime("%Y-%m-%d")]
     # stdin closed inside run_capped: gcalcli falls back to asking questions
@@ -508,6 +579,13 @@ def parse_google_rows(from_day, to_day):
     out = run_capped(command)
     if out is None:
         return None
+
+    if use_json:
+        rows = google_json_rows(out)
+        if rows is None:
+            GOOGLE_ERROR = "google-invalid-data"
+        # A failed JSON response must not retry via the lossy TSV format.
+        return rows
 
     # gcalcli separates records with LF and escapes LF inside fields as ``\\n``.
     # Outlook descriptions can retain a raw CR before that escape, which
@@ -524,7 +602,20 @@ def parse_google_rows(from_day, to_day):
         return []
 
     headers = lines[0].split("\t")
-    return [dict(zip(headers, line.split("\t"))) for line in lines[1:]]
+    required = {"start_date", "start_time", "end_date", "end_time", "title", "calendar"}
+    if len(set(headers)) != len(headers) or not required.issubset(headers):
+        GOOGLE_ERROR = "google-invalid-data"
+        return None
+    rows = []
+    for line in lines[1:]:
+        fields = line.split("\t")
+        if len(fields) != len(headers):
+            # TSV cannot distinguish a field's literal tab from a delimiter.
+            # Never guess which field owned it, or return a partial agenda.
+            GOOGLE_ERROR = "google-tsv-ambiguous"
+            return None
+        rows.append(dict(zip(headers, fields)))
+    return rows
 
 
 _ical_raw = None
@@ -1520,6 +1611,8 @@ def main():
                        "%s-failed" % command_name))))),
             "events": [], "allday": [], "days": [],
         })
+        if PROVIDER == "google" and GOOGLE_ERROR:
+            payload["error"] = GOOGLE_ERROR
         dump(payload)
         return 0
 
