@@ -121,6 +121,27 @@ VISIBLE = [str(name) for name in _visible] if isinstance(_visible, list) and _vi
 VIEW = "day" if STATE.get("view") == "day" else "week"
 COMPACT = STATE.get("compact") is True
 
+# Appointments waved away, as {key: "YYYY-MM-DD"}. One occurrence each: a weekly
+# meeting hidden today is back next week, because the key carries the date it
+# falls on. That date is also what lets old entries be swept up, so the file does
+# not grow a line per dismissal forever.
+_dismissed = STATE.get("dismissed")
+DISMISSED = ({str(key): str(value) for key, value in _dismissed.items()}
+             if isinstance(_dismissed, dict) else {})
+
+
+def dismiss_key(row, day):
+    """Names one occurrence: the day it falls on, plus whatever the source calls
+    it. Sources disagree about ids (Google gives every occurrence of a repeat the
+    same one, an iCalendar feed may carry none at all), so the day is what tells
+    the occurrences apart and the start and title are the fallback when there is
+    no id to lean on."""
+    identifier = str(row.get("id") or "").strip()
+    if not identifier:
+        identifier = "%s|%s" % (str(row.get("start_time") or ""),
+                                str(row.get("title") or ""))
+    return "%s|%s" % (day.isoformat(), identifier)
+
 
 # gcalcli stores its token here, and without one it starts an interactive auth
 # flow of its own. A bar widget that refreshes every minute must never do that,
@@ -1108,11 +1129,19 @@ def event_from(row, day):
         "organizer": str(row.get("email") or ""),
         "attendees": parse_attendees(row.get("attendees")),
         "attendees_embedded": isinstance(row.get("attendees"), list),
+        # What the panel hands back to `dismiss`, so it never has to rebuild a
+        # key of its own out of fields it happens to be drawing.
+        "key": dismiss_key(row, day),
     }
 
     if not title:
         return None
     if title in SKIP_TITLES:
+        return None
+    # Waved away from the panel earlier today. Checked here so it drops out of
+    # the bar, the day and the week in one place, the way the calendar filters
+    # already do.
+    if dismiss_key(row, day) in DISMISSED:
         return None
 
     if ONLY_CALENDAR:
@@ -1482,6 +1511,34 @@ def main():
         merged["visibleCalendars"] = chosen
         ok = write_private(STATE_PATH, json.dumps(merged))
         dump({"ok": ok, "visible": chosen or None})
+        return 0
+
+    if command == "dismiss":
+        # The key comes from the payload the panel was already drawing, so it
+        # names an occurrence this script produced rather than anything typed.
+        # It is stored against the day it falls on, which is the first field.
+        key = ARGV[1] if len(ARGV) > 1 else ""
+        if not key or "|" not in key:
+            dump({"ok": False, "error": "usage: meetings-widget dismiss <key>"})
+            return 0
+
+        day_part = key.split("|", 1)[0]
+        try:
+            date.fromisoformat(day_part)
+        except ValueError:
+            dump({"ok": False, "error": "key does not start with a date"})
+            return 0
+
+        # Yesterday's dismissals can never match again, so this is the moment to
+        # drop them: the file stays the size of the days you still care about
+        # instead of growing for as long as the plugin is installed.
+        horizon = (date.today() - timedelta(days=1)).isoformat()
+        kept = {name: when for name, when in DISMISSED.items() if when >= horizon}
+        kept[key] = day_part
+
+        merged = dict(STATE)
+        merged["dismissed"] = kept
+        dump({"ok": write_private(STATE_PATH, json.dumps(merged)), "dismissed": len(kept)})
         return 0
 
     mode = "week" if command == "week" else "day"

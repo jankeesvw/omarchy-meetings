@@ -108,9 +108,11 @@ A subscribed feed has to be `https://` or `webcal://`. That URL is the whole key
 
 **Which ones are online.** Appointments with a meeting link carry a small camera after the title in the grid, so a glance tells you which ones you click into and which ones you have to walk to.
 
-**One appointment, opened.** Press Enter or click, and it expands into a card over the grid: when it is and how long it runs, which calendar it came from, where it is, who is coming and whether they answered, and the description. Three small buttons under it: join the call, open it in the configured calendar, and copy the link. They are a glyph and one word each so they fit on one line, and the mouse gets the whole sentence as a tooltip. Escape goes back to the grid.
+**One appointment, opened.** Press Enter or click, and it expands into a card over the grid: when it is and how long it runs, which calendar it came from, where it is, who is coming and whether they answered, and the description. Four small buttons under it: join the call, open it in the configured calendar, copy the link, and hide it. They are a glyph and one word each so they fit on one line, and the mouse gets the whole sentence as a tooltip. Escape goes back to the grid.
 
 ![An appointment opened over the week](screenshots/detail.png)
+
+**Something you do not need to see.** Not everything on a calendar is worth a line in the bar all day. Hide takes one appointment out of the bar, the day and the week at once. It hides that single occurrence, so the same meeting next week is still there, and entries for days gone by are swept up the next time you hide something, which keeps the list from growing forever. Nothing changes in the calendar itself, only in what this panel draws.
 
 With Google, attendees do not come out of gcalcli's output, so they are fetched from the Calendar API by reusing gcalcli's token. With Microsoft, the widget asks Graph through `m365`. Either way, this happens only for the one appointment you opened and only at the moment you ask for it.
 

@@ -35,6 +35,7 @@ Panel {
   readonly property string iconOpen: "\uf08e"
   readonly property string iconCopy: "\uf0c5"
   readonly property string iconCopied: "\uf00c"
+  readonly property string iconHide: "\uf070"
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color urgent: bar ? bar.urgent : Color.urgent
@@ -168,6 +169,13 @@ Panel {
       out.push({ label: copiedLink ? "Copied" : "Copy",
                  icon: copiedLink ? iconCopied : iconCopy,
                  tip: "Copy the link to the clipboard", copy: copyUrl })
+    // Last, and only with a key to name the occurrence by. It hides this one
+    // sitting today; the same meeting next week is untouched, which is why the
+    // tooltip says today rather than promising more than it does.
+    var key = String(detailEvent.key || "")
+    if (key !== "")
+      out.push({ label: "Hide", icon: iconHide,
+                 tip: "Hide this appointment for today", dismiss: key })
     return out
   }
 
@@ -764,7 +772,19 @@ Panel {
   function runDetailAction(action) {
     if (!action) return
     if (action.copy) copyLink(action.copy)
+    else if (action.dismiss) dismissEvent(action.dismiss)
     else openUrl(action.url)
+  }
+
+  // Hiding one occurrence. The detail card is closed first: it is showing the
+  // appointment that is about to leave the list, and leaving it up means reading
+  // something that is no longer there. The refresh is what makes it disappear,
+  // because the filtering happens in the script rather than here.
+  function dismissEvent(key) {
+    if (!key) return
+    dismissProc.command = [root.script, "dismiss", String(key)]
+    dismissProc.running = true
+    closeDetail()
   }
 
   function showDetail(event) {
@@ -916,6 +936,14 @@ Panel {
 
   Process {
     id: compactProc
+  }
+
+  // The refresh waits for the write to land: the script filters on what it reads
+  // back from state.json, so a fetch that starts first would return the very
+  // appointment that was just hidden and leave it on screen until the next tick.
+  Process {
+    id: dismissProc
+    onExited: function(exitCode) { root.refresh() }
   }
 
   // Sending the join notification. The click is handled by the notification
