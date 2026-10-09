@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // Today's agenda as a day column, the way a calendar draws it:
@@ -37,8 +38,8 @@ Panel {
   readonly property string iconCopied: "\uf00c"
   readonly property string iconHide: "\uf070"
 
-  readonly property color foreground: bar ? bar.foreground : Color.foreground
-  readonly property color urgent: bar ? bar.urgent : Color.urgent
+  readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
+  readonly property color urgent: bar ? bar.urgent : Commons.Color.urgent
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   // Always a list of days, in day mode too: then there is one of them. That way
@@ -1076,7 +1077,7 @@ Panel {
             text: root.iconCalendar
             fontFamily: root.fontFamily
             fontSize: Style.bar.iconFont
-            color: root.almostDue ? Color.background : root.foreground
+            color: root.almostDue ? Commons.Color.background : root.foreground
           }
 
           Text {
@@ -1087,7 +1088,7 @@ Panel {
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             renderType: Text.NativeRendering
-            color: root.almostDue ? Color.background
+            color: root.almostDue ? Commons.Color.background
                                   : (root.inMeeting ? root.urgent : root.foreground)
           }
         }
@@ -1370,7 +1371,7 @@ Panel {
                 width: dayName.implicitWidth + Style.space(12)
                 height: dayName.implicitHeight + Style.space(3)
                 radius: height / 2
-                color: Color.accent
+                color: Commons.Color.accent
               }
 
               Text {
@@ -1380,7 +1381,7 @@ Panel {
                 text: modelData.short_label
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
-                color: modelData.is_today ? Color.background : root.foreground
+                color: modelData.is_today ? Commons.Color.background : root.foreground
                 opacity: modelData.is_today ? 1 : 0.6
               }
             }
@@ -1427,7 +1428,7 @@ Panel {
                     radius: 0
                     readonly property color tint: Qt.lighter(modelData.color, 1.25)
                     color: Qt.rgba(tint.r, tint.g, tint.b, 0.24)
-                    border.color: Color.accent
+                    border.color: Commons.Color.accent
                     border.width: root.sameEvent(root.cursorEvent, modelData) ? 1 : 0
 
                     Rectangle {
@@ -1731,7 +1732,7 @@ Panel {
                 Rectangle {
                   anchors.fill: parent
                   visible: root.weekView && dayColumn.modelData.is_today
-                  color: Color.accent
+                  color: Commons.Color.accent
                   // Enough to find the column, not so much that the
                   // appointments in it look like a different colour from the
                   // same appointment on another day.
@@ -1748,7 +1749,7 @@ Panel {
                     x: index === 0 ? 0 : dayColumn.width - width
                     width: 1
                     height: dayColumn.height
-                    color: Color.accent
+                    color: Commons.Color.accent
                     opacity: 0.5
                   }
                 }
@@ -1811,7 +1812,7 @@ Panel {
                     color: Qt.rgba(tint.r, tint.g, tint.b, isNow ? 0.5 : 0.28)
                     opacity: isPast ? 0.4 : 1
                     border.width: root.sameEvent(root.cursorEvent, modelData) ? 1 : 0
-                    border.color: Color.accent
+                    border.color: Commons.Color.accent
 
                     Rectangle {
                       anchors.left: parent.left
@@ -1911,7 +1912,7 @@ Panel {
                 text: root.clockText
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
-                color: Color.background
+                color: Commons.Color.background
               }
             }
 
@@ -1967,7 +1968,7 @@ Panel {
           // on it, so you can still tell where you are.
           property bool hot: false
           onHovered: function(isHovered) { hot = isHovered }
-          color: (hot || hasCursor) ? Style.hoverFillFor(root.foreground, Color.accent)
+          color: (hot || hasCursor) ? Style.hoverFillFor(root.foreground, Commons.Color.accent)
                                     : "transparent"
           borderSpec: Border.flat("transparent", 0)
           onClicked: root.toggleBorrowed()
@@ -2066,7 +2067,7 @@ Panel {
             return Math.max(margin, parent.height - height - margin)
           }
 
-          color: Color.popups ? Color.popups.background : Color.background
+          color: Commons.Color.popups ? Commons.Color.popups.background : Commons.Color.background
           radius: Style.cornerRadius
           border.width: Style.normalBorderWidth
           border.color: root.detailEvent ? root.detailEvent.color : root.foreground
