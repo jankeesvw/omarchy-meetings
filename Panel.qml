@@ -1034,63 +1034,65 @@ Panel {
     anchors.fill: parent
     bar: root.bar
     slotSize: root.barSlot
-    opticalSize: root.barLabel === "" ? Style.bar.iconCanvas : root.barSlot
     opacity: root.reachable ? 1 : 0.5
     // While the appointment is running the bar stands out; otherwise it is a
     // look ahead.
     active: root.current !== null
     tooltipText: root.compact ? root.fullBarLabel : ""
 
-    iconComponent: Component {
-      Item {
-        // Nearly time: the whole pill colours, the way the old module did. A
-        // tint on the text alone is invisible out of the corner of your eye.
+    // Not an iconComponent: the shell scales that down to icon size, which
+    // would shrink the title next to the icon to a smudge.
+    hasVisualContent: true
+
+    Item {
+      anchors.fill: parent
+      // Nearly time: the whole pill colours, the way the old module did. A
+      // tint on the text alone is invisible out of the corner of your eye.
+      Rectangle {
+        anchors.centerIn: parent
+        width: barRow.implicitWidth + Style.space(8)
+        height: Style.space(18)
+        radius: Style.cornerRadius
+        visible: root.almostDue
+        color: root.urgentFill
+      }
+
+      Row {
+        id: barRow
+        anchors.centerIn: parent
+        spacing: Style.space(5)
+
+        // The calendar colour, in place of the emoji square it used to be.
         Rectangle {
-          anchors.centerIn: parent
-          width: barRow.implicitWidth + Style.space(8)
-          height: Style.space(18)
-          radius: Style.cornerRadius
-          visible: root.almostDue
-          color: root.urgentFill
+          anchors.verticalCenter: parent.verticalCenter
+          visible: root.upcoming !== null && !root.almostDue && !root.compact
+          width: Style.space(7)
+          height: Style.space(7)
+          radius: width / 2
+          color: root.upcoming ? root.upcoming.color : "transparent"
         }
 
-        Row {
-          id: barRow
-          anchors.centerIn: parent
-          spacing: Style.space(5)
+        OpticalGlyph {
+          anchors.verticalCenter: parent.verticalCenter
+          width: Style.bar.iconCanvas
+          height: Style.bar.iconCanvas
+          visible: root.compact || root.upcoming === null
+          text: root.iconCalendar
+          fontFamily: root.fontFamily
+          fontSize: Style.bar.iconFont
+          color: root.almostDue ? Commons.Color.background : root.foreground
+        }
 
-          // The calendar colour, in place of the emoji square it used to be.
-          Rectangle {
-            anchors.verticalCenter: parent.verticalCenter
-            visible: root.upcoming !== null && !root.almostDue && !root.compact
-            width: Style.space(7)
-            height: Style.space(7)
-            radius: width / 2
-            color: root.upcoming ? root.upcoming.color : "transparent"
-          }
-
-          OpticalGlyph {
-            anchors.verticalCenter: parent.verticalCenter
-            width: Style.bar.iconCanvas
-            height: Style.bar.iconCanvas
-            visible: root.compact || root.upcoming === null
-            text: root.iconCalendar
-            fontFamily: root.fontFamily
-            fontSize: Style.bar.iconFont
-            color: root.almostDue ? Commons.Color.background : root.foreground
-          }
-
-          Text {
-            textFormat: Text.PlainText
-            anchors.verticalCenter: parent.verticalCenter
-            visible: root.barLabel !== ""
-            text: root.barLabel
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            renderType: Text.NativeRendering
-            color: root.almostDue ? Commons.Color.background
-                                  : (root.inMeeting ? root.urgent : root.foreground)
-          }
+        Text {
+          textFormat: Text.PlainText
+          anchors.verticalCenter: parent.verticalCenter
+          visible: root.barLabel !== ""
+          text: root.barLabel
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          renderType: Text.NativeRendering
+          color: root.almostDue ? Commons.Color.background
+                                : (root.inMeeting ? root.urgent : root.foreground)
         }
       }
     }
